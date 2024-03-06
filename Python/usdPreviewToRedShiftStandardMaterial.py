@@ -34,6 +34,7 @@ def handleMap(material, slot):
         rsTexture.tex0_filename = filePath
         if slot == "diffuseColor_map":
             rsTexture.tex0_colorSpace = 'sRGB'
+            setattr(rsMat, mapping[slot], rsTexture)
         elif slot == "normal_map":
             rsTexture.tex0_colorSpace = 'Raw'
             bump = rt.rsBumpMap()
