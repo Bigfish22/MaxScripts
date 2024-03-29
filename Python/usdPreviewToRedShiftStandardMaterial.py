@@ -47,6 +47,7 @@ def handleMap(material, slot):
 
 for material in rt.getclassinstances(rt.MaxUsdPreviewSurface):
     rsMat = rt.rsStandardMaterial()
+    rsMat.name = material.name
     for slot in mapping:
         if slot.endswith("_map"):
             handleMap(material, slot)
