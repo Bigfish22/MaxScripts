@@ -2,7 +2,11 @@ from pxr import Usd, UsdGeom, UsdUtils, Sdf, Gf
 import os
 from pymxs import runtime as rt
 
-from PySide2 import QtCore, QtWidgets, QtGui
+try:
+    from PySide2 import QtCore, QtWidgets, QtGui
+except:
+    from PySide6 import QtCore, QtWidgets, QtGui
+    
 import qtmax
 
 def exportShapes(tyflowNode, assetFolder):
