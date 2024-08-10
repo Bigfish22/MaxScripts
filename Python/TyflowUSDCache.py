@@ -1,6 +1,7 @@
 from pxr import Usd, UsdGeom, UsdUtils, Sdf, Gf
 import os
 from pymxs import runtime as rt
+import time
 
 try:
     from PySide2 import QtCore, QtWidgets, QtGui
@@ -53,7 +54,8 @@ def exportShapes(nodes, assetFolder):
     rt.delete(nodes)
     return assets
 
-def cacheScene(targetFile, pointInstancePath, assetSubFolder, frameRange):
+def cacheScene(targetFile, pointInstancePath, assetSubFolder, frameRange, cachePos, cacheRot, cacheScale, cacheVel, cacheVelScale):
+    processStart = time.perf_counter()
     sel = rt.selection
     tyflowNode = sel[0]
 
@@ -66,13 +68,27 @@ def cacheScene(targetFile, pointInstancePath, assetSubFolder, frameRange):
         stage = Usd.Stage.CreateNew(targetFile)
         
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    unitToMeters = {rt.name("inches") : 0.0254, rt.name("feet") : 0.3048, rt.name("miles") : 1609.34, rt.name("millimeters") : 0.001, rt.name("centimeters") : 0.01, rt.name("meters") : 1, rt.name("kilometers") : 1000}
+    UsdGeom.SetStageMetersPerUnit(stage, unitToMeters[rt.units.SystemType])
 
     pointInstancer = UsdGeom.PointInstancer.Define(stage, pointInstancePath)
-
-    posAttr = pointInstancer.CreatePositionsAttr()
-    orientAttr = pointInstancer.CreateOrientationsAttr()
-    scalesAttr = pointInstancer.CreateScalesAttr()
+    
+    if cachePos:
+        posAttr = pointInstancer.CreatePositionsAttr()
+    if cacheRot:
+        orientAttr = pointInstancer.CreateOrientationsAttr()
+    if cacheScale:
+        scalesAttr = pointInstancer.CreateScalesAttr()
+    if cacheVel:
+        velAttr = pointInstancer.CreateVelocitiesAttr()
+    
     protoIndicesAttr = pointInstancer.CreateProtoIndicesAttr()
+    
+    animated = False
+    if frameRange[0] != frameRange[1]:
+        animated = True
+    else:
+        cacheVel = False
     
     nodes = []
     for frame in range(frameRange[0], frameRange[1]+1):
@@ -83,36 +99,55 @@ def cacheScene(targetFile, pointInstancePath, assetSubFolder, frameRange):
         positionsArray = []
         rotationArray = []
         scaleArray = []
-
-        for matrix in tyflowNode.getAllParticleTMs():
-            pos = matrix.position
-            positionsArray.append(Gf.Vec3f(pos[0], pos[1], pos[2]))
+        velArray = []
+        
+        if cacheVel:
+            velocities = tyflowNode.getAllParticleVelocities()
+        for i, matrix in enumerate(tyflowNode.getAllParticleTMs()):
             
-            rotation = rt.normalize(matrix.rotation)
-            rotationArray.append(Gf.Quath(-rotation.w, rotation.x, rotation.y, rotation.z))
+            if cachePos:
+                pos = matrix.position
+                positionsArray.append(Gf.Vec3f(pos[0], pos[1], pos[2]))
+            if cacheRot:
+                rotation = rt.normalize(matrix.rotation)
+                rotationArray.append(Gf.Quath(-rotation.w, rotation.x, rotation.y, rotation.z))
+            if cacheScale:
+                scale = matrix.scale
+                scaleArray.append(Gf.Vec3f(scale[0], scale[1], scale[2]))
             
-            scale = matrix.scale
-            scaleArray.append(Gf.Vec3f(scale[0], scale[1], scale[2]))
-    
-        if frameRange[0] != frameRange[1]:
-            #set framerate
-            stage.SetFramesPerSecond(rt.frameRate)
+            if cacheVel:
+                velocity = velocities[i] * cacheVelScale
+                velArray.append(Gf.Vec3f(velocity[0], velocity[1], velocity[2]))
             
-            posAttr.Set(positionsArray, frame)
-            orientAttr.Set(rotationArray, frame)
-            scalesAttr.Set(scaleArray, frame)
+        if animated:
+            if cachePos:
+                posAttr.Set(positionsArray, frame)
+            if cacheRot:
+                orientAttr.Set(rotationArray, frame)
+            if cacheScale:
+                scalesAttr.Set(scaleArray, frame)
+            if cacheVel:
+                velAttr.Set(velArray, frame)
             
             protoIndicesAttr.Set(nodeIndexArray, frame)
         else:
-            posAttr.Set(positionsArray)
-            orientAttr.Set(rotationArray)
-            scalesAttr.Set(scaleArray)
+            if cachePos:
+                posAttr.Set(positionsArray)
+            if cacheRot:
+                orientAttr.Set(rotationArray)
+            if cacheScale:
+                scalesAttr.Set(scaleArray)
             
             protoIndicesAttr.Set(nodeIndexArray)
      
     assets = exportShapes(nodes, os.path.join(os.path.dirname(targetFile), assetSubFolder))
 
-
+    if frameRange[0] != frameRange[1]:
+        #save time settings
+        stage.SetFramesPerSecond(rt.frameRate)
+        stage.SetStartTimeCode(frameRange[0])
+        stage.SetEndTimeCode(frameRange[1])
+    
     protoArray = pointInstancer.CreatePrototypesRel()
     shapeId = 0
     for asset in assets:
@@ -123,6 +158,8 @@ def cacheScene(targetFile, pointInstancePath, assetSubFolder, frameRange):
         shapeId += 1
 
     stage.Save()
+    processEnd = time.perf_counter()
+    print(f"cache Took {processEnd - processStart:0.4f} seconds")
     
 class TyUSDCache(QtWidgets.QWidget):
     def __init__(self, parent = None):
@@ -168,6 +205,26 @@ class TyUSDCache(QtWidgets.QWidget):
         self.timeBoxLayout.addWidget(self.endTime)
         self.timeBoxLayout.addWidget(self.getTimeRangeFromMaxButton)
         
+        
+        #channels
+        self.channelEnablePos = QtWidgets.QCheckBox("Position")
+        self.channelEnablePos.setChecked(True)
+        self.channelEnableRot = QtWidgets.QCheckBox("Rotation")
+        self.channelEnableRot.setChecked(True)
+        self.channelEnableScale = QtWidgets.QCheckBox("Scale")
+        self.channelEnableScale.setChecked(True)
+        
+        self.velBox = QtWidgets.QWidget()
+        self.velBoxLayout = QtWidgets.QHBoxLayout(self.velBox)
+        self.channelEnableVel = QtWidgets.QCheckBox("Velocity")
+        self.channelEnableVel.setChecked(True)
+        self.channelScaleVel = QtWidgets.QSpinBox()
+        self.channelScaleVel.setRange(-10000, 10000)
+        self.channelScaleVel.setValue(1)
+        self.velBoxLayout.addWidget(self.channelEnableVel)
+        self.velBoxLayout.addWidget(QtWidgets.QLabel("Scale:"))
+        self.velBoxLayout.addWidget(self.channelScaleVel)
+        
         self.cacheButton = QtWidgets.QPushButton("Cache")
         self.cacheButton.clicked.connect(self.cacheButtonClick)
         
@@ -179,6 +236,13 @@ class TyUSDCache(QtWidgets.QWidget):
         self.boxlayout.addWidget(self.PointName)
         self.boxlayout.addWidget(textLabelTimeRange)
         self.boxlayout.addWidget(self.timeBox)
+        
+        self.boxlayout.addWidget(self.channelEnablePos)
+        self.boxlayout.addWidget(self.channelEnableRot)
+        self.boxlayout.addWidget(self.channelEnableScale)
+        
+        self.boxlayout.addWidget(self.velBox)
+        
         self.boxlayout.addStretch(0)
         self.boxlayout.addWidget(self.cacheButton)
         
@@ -189,7 +253,13 @@ class TyUSDCache(QtWidgets.QWidget):
         if len(sel) != 1:
             print("invalid selection, make sure to only selection a single tyflow object")
         elif rt.classOf(rt.selection[0]) == rt.tyFlow:
-            cacheScene(self.targetFile.text(), self.PointName.text(), self.subFolder.text(), [self.startTime.value(), self.endTime.value()])
+            pos = self.channelEnablePos.isChecked()
+            rot = self.channelEnableRot.isChecked()
+            scale = self.channelEnableScale.isChecked()
+            vel = self.channelEnableVel.isChecked()
+            velScale = self.channelScaleVel.value()
+            
+            cacheScene(self.targetFile.text(), self.PointName.text(), self.subFolder.text(), [self.startTime.value(), self.endTime.value()], pos, rot, scale, vel, velScale)
         else:
             print("tyflow object not selected")
         
@@ -210,6 +280,6 @@ if __name__ == "__main__":
     main_window = qtmax.GetQMaxMainWindow()
     widget = TyUSDCache(parent=main_window)
     widget.setWindowTitle("TyFlow USD Cache")
-    widget.resize(335, 300)
+    widget.resize(335, 600)
     widget.show()
     
