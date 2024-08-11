@@ -38,7 +38,7 @@ def findUniqueShapes(tyflowNode, nodesList):
             
     return nodeIndex, nodes
     
-def exportShapes(nodes, assetFolder):
+def exportShapes(nodes, assetFolder, subFolderName):
     assets = []
     
     for node in nodes:
@@ -46,10 +46,11 @@ def exportShapes(nodes, assetFolder):
         singleNode.append(node)
         fileName = node.name + ".usd"
         assetPath = os.path.join(assetFolder, fileName)
+        relAssetPath = os.path.join(subFolderName, fileName)
         UsdOptions = rt.USDExporter.UIOptions
         UsdOptions.Meshes = True
         rt.USDExporter.ExportFile(assetPath, contentSource = rt.name("nodeList"), exportOptions = UsdOptions, nodeList = node)
-        assets.append(assetPath)
+        assets.append(relAssetPath)
         
     rt.delete(nodes)
     return assets
@@ -91,6 +92,7 @@ def cacheScene(targetFile, pointInstancePath, assetSubFolder, frameRange, cacheP
         cacheVel = False
     
     nodes = []
+    rt.progressStart("Caching USD...")
     for frame in range(frameRange[0], frameRange[1]+1):
         tyflowNode.updateParticles(frame)
 
@@ -130,6 +132,10 @@ def cacheScene(targetFile, pointInstancePath, assetSubFolder, frameRange, cacheP
                 velAttr.Set(velArray, frame)
             
             protoIndicesAttr.Set(nodeIndexArray, frame)
+            
+            if not rt.progressUpdate(((frame - frameRange[0]) / (frameRange[1] - frameRange[0]))*100, stepName = "caching points"):
+                rt.progressEnd() 
+                return
         else:
             if cachePos:
                 posAttr.Set(positionsArray)
@@ -140,7 +146,7 @@ def cacheScene(targetFile, pointInstancePath, assetSubFolder, frameRange, cacheP
             
             protoIndicesAttr.Set(nodeIndexArray)
      
-    assets = exportShapes(nodes, os.path.join(os.path.dirname(targetFile), assetSubFolder))
+    assets = exportShapes(nodes, os.path.join(os.path.dirname(targetFile), assetSubFolder), assetSubFolder)
 
     if frameRange[0] != frameRange[1]:
         #save time settings
@@ -158,6 +164,7 @@ def cacheScene(targetFile, pointInstancePath, assetSubFolder, frameRange, cacheP
         shapeId += 1
 
     stage.Save()
+    rt.progressEnd() 
     processEnd = time.perf_counter()
     print(f"cache Took {processEnd - processStart:0.4f} seconds")
     
@@ -280,6 +287,6 @@ if __name__ == "__main__":
     main_window = qtmax.GetQMaxMainWindow()
     widget = TyUSDCache(parent=main_window)
     widget.setWindowTitle("TyFlow USD Cache")
-    widget.resize(335, 600)
+    widget.resize(335, 400)
     widget.show()
     
