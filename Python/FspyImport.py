@@ -41,7 +41,7 @@ class CameraImporter(QtWidgets.QWidget):
             hFov = dict["horizontalFieldOfView"]
             cam = rt.Freecamera()
             cam.transform = maxMatrix
-            cam.fov = fov * (180/pi) 
+            cam.fov = hFov * (180/pi) 
         
     
 if __name__ == "__main__":
